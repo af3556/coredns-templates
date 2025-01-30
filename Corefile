@@ -1,0 +1,118 @@
+# This file provides a handful of examples of using the various DNS Swiss army
+# knife tools provided by CoreDNS.
+
+# Serve a domain from a traditional zone file
+#example.org {
+#    file etc/coredns/dbfiles/db.example.org
+#}
+
+# {a,b,c}.localhost
+# One localhost ought to be enough for anyone...
+# When accessing web services on localhost the browser will see all of them as
+# the same domain with regard to cookies. This can be problematic if you have
+# multiple distinct instances of services on varying ports, and potentially
+# could run into per-domain limits on cookie numbers and size (ditto web
+# storage).
+# One example use case is if you're working on a fleet of remote services that
+# are all tunnelled to varying ports on localhost: cookie scopes don't
+# incorporate ports so these distinct HTTP services accessed via localhost will
+# interfere with each other (e.g. overwrite each other's cookies).
+# Solution: give each instance its own name (within .localhost), e.g.
+# {a,b,c}.localhost
+# - see also https://datatracker.ietf.org/doc/html/draft-west-let-localhost-be-localhost-06
+# - note that some browsers - Chrome on at least macOS - do this internally "for
+#   security"; they hard-code *.localhost to 127.0.0.1 and won't even ask the
+#   system resolver
+#   - i.e. this setup may not be needed if your use case doesn't depend on the
+#     system resolver (100% in Chrome, no CLI/etc)
+#   - ref. https://issues.chromium.org/issues/41188485
+#
+# implementation:
+#  - db.localhost wildcards *.localhost to 127.0.0.1 / ::1
+#  - can't use coredns' built-in plugin `local`, that only handles specific names
+localhost {
+    log
+    file etc/coredns/dbfiles/db.localhost
+}
+
+# Transparently use a staging environment
+# Access host.example.com but actually resolve it to host.stage.example.com
+# - this is akin to curl's --connect-to argument
+#host.example.com {
+#    log
+#    errors
+#    rewrite name host.example.com host.stage.example.com
+#    forward . 127.0.0.1 # send it back through to get resolved
+#}
+
+# Log and SERVFAIL typos
+# e.g. if you have a typosquatted domain and want to make sure you don't hit it
+#exmaple.com {
+#    log
+#}
+
+# Use snippets
+# Direct requests to specific resolvers within an organisation, selectively
+# overriding hosts from a local zone file; send everything else to public
+# resolvers using DoT.
+# i.e. when you don't have properly functioning internal DNS ;-)
+# - label the snippet after the zone (s/./:/g)
+(corp:example:com) {
+    #prometheus  # http://localhost:9153/metrics
+    reload 10s  # default is 30s; default jitter is 1/2 reload time
+    log
+    errors
+    hosts etc/coredns/hosts-corp.example.com {
+        fallthrough
+    }
+}
+
+a.corp.example.com {
+    import corp:example:com
+    forward . 10.1.1.1 {
+        max_fails 0
+    }
+}
+
+c.corp.example.com {
+    import corp:example:com
+    forward . 10.2.1.1 {
+        max_fails 0
+    }
+}
+
+c.corp.example.com {
+    import corp:example:com
+    forward . 10.3.1.1 {
+        max_fails 0
+    }
+}
+
+corp.example.com {
+    import corp:example:com
+    forward . 1.1.1.1 1.0.0.1 {
+        tls_servername cloudflare-dns.com
+        health_check 300s
+    }
+}
+
+# "everything else"
+. {
+    #prometheus  # http://localhost:9153/metrics
+    reload 10s  # default is 30s; default jitter is 1/2 reload time
+    errors
+    log
+    local   # respond for localhost.*, and related
+
+    hosts etc/coredns/hosts {
+        fallthrough
+    }
+
+    # if you want/need to use local DNS resolvers
+    # - take care /etc/resolv.conf doesn't point to _this_ coredns instance
+    #forward . /etc/resolv.conf
+    forward . 1.1.1.1 1.0.0.1 {
+        tls_servername cloudflare-dns.com
+        health_check 300s
+    }
+}

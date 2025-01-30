@@ -1,0 +1,6 @@
+
+127.0.0.1 canary.example.net
+
+# 🌈 = xn--og8h (punycode) = \240\159\140\136 (unicode)
+127.0.0.1 xn--og8h.example.net
+127.0.0.1 \240\159\140\136.example.net
